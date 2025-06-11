@@ -5,9 +5,9 @@
 
 struct SPIPins
 {
-    const uint16_t MOSI = 23;
-    const uint16_t MISO = 19;
-    const uint16_t SCK  = 18;
+    static const uint16_t MOSI = 23;
+    static const uint16_t MISO = 19;
+    static const uint16_t SCK  = 18;
 };
 
 #endif  // SPI_H

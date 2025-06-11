@@ -7,6 +7,14 @@
 #include <SPI.h>
 #include <TMCStepper.h>
 
+// Derived class to access protected methods
+class TMC5160StepperExtended : public TMC5160Stepper
+{
+public:
+    TMC5160StepperExtended(uint16_t pinCS, float RS) : TMC5160Stepper(pinCS, RS) {}
+    using TMC5160Stepper::read;
+    using TMC5160Stepper::write;
+};
 
 class TMC5160Manager
 {
@@ -36,33 +44,25 @@ public:
     void enableDriver(uint8_t driverIndex, bool enable);
     void setCurrent(uint8_t driverIndex, uint16_t current);
     void setMicrosteps(uint8_t driverIndex, uint16_t microsteps);
-    void setMaxSpeed(uint8_t driverIndex, uint32_t speed);
-    void setAcceleration(uint8_t driverIndex, uint32_t acceleration);
 
     // Motion Control
-    void moveToPosition(uint8_t driverIndex, int32_t position);
-    void moveRelative(uint8_t driverIndex, int32_t distance);
     void stopMotor(uint8_t driverIndex);
     void emergencyStop();
 
-    // Status Monitoring
-    bool     isMoving(uint8_t driverIndex);
-    int32_t  getCurrentPosition(uint8_t driverIndex);
-    uint32_t getCurrentSpeed(uint8_t driverIndex);
-
 private:
-    static constexpr uint8_t  NUM_DRIVERS = 4;
-    static constexpr uint32_t SPI_CLOCK   = 1000000;  // 1MHz SPI clock
-    static constexpr uint32_t R_SENSE     = 0.075f;   // Sense resistor value in ohms
+    static constexpr uint8_t  NUM_DRIVERS     = 4;
+    static constexpr uint32_t SPI_CLOCK       = 1000000;  // 1MHz SPI clock
+    static constexpr float    R_SENSE         = 0.11f;    // Sense resistor value in ohms (updated value)
+    static constexpr uint16_t DEFAULT_CURRENT = 1000;     // Default current in mA
 
-    TMC5160Stepper* drivers[NUM_DRIVERS];
-    bool            driverEnabled[NUM_DRIVERS];
-    int32_t         currentPositions[NUM_DRIVERS];
+    TMC5160StepperExtended* drivers[NUM_DRIVERS];
+    bool                    driverEnabled[NUM_DRIVERS];
+    int32_t                 currentPositions[NUM_DRIVERS];
 
     // Private helper methods
-    void configureDriver(uint8_t driverIndex);
-    bool checkDriverVersion(uint8_t driverIndex);
-    void updateDriverStatus(uint8_t driverIndex);
+    void     configureDriver(uint8_t driverIndex);
+    void     setSGTHRS(uint8_t driverIndex, uint32_t threshold);
+    uint32_t getSG_RESULT(uint8_t driverIndex);
 };
 
 #endif  // TMC5160_MANAGER_H

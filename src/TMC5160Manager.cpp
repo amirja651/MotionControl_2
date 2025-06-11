@@ -21,7 +21,7 @@ bool TMC5160Manager::begin()
     for (uint8_t i = 0; i < NUM_DRIVERS; i++)
     {
         // Create new driver instance
-        drivers[i] = new TMC5160Stepper(DriverPins::CS[i], R_SENSE);
+        drivers[i] = new TMC5160StepperExtended(DriverPins::CS[i], R_SENSE);
 
         // Configure pins
         pinMode(DriverPins::DIR[i], OUTPUT);
@@ -61,11 +61,21 @@ TMC5160Manager::DriverStatus TMC5160Manager::getDriverStatus(uint8_t driverIndex
         return status;
     }
 
-    status.connected   = true;
-    status.version     = drivers[driverIndex]->version();
-    status.status      = drivers[driverIndex]->DRV_STATUS();
-    status.stallGuard  = drivers[driverIndex]->TCOOLTHRS();
-    status.current     = drivers[driverIndex]->rms_current();
+    status.connected  = true;
+    status.version    = drivers[driverIndex]->version();
+    status.status     = drivers[driverIndex]->DRV_STATUS();
+    status.stallGuard = drivers[driverIndex]->TCOOLTHRS();
+
+    // Safely get current value
+    try
+    {
+        status.current = drivers[driverIndex]->rms_current();
+    }
+    catch (...)
+    {
+        status.current = 0;
+    }
+
     status.temperature = drivers[driverIndex]->TSTEP();
 
     return status;
@@ -78,30 +88,36 @@ void TMC5160Manager::configureDriver(uint8_t driverIndex)
         return;
     }
 
-    TMC5160Stepper* driver = drivers[driverIndex];
+    TMC5160StepperExtended* driver = drivers[driverIndex];
 
     // Basic configuration
     driver->begin();
-    driver->toff(5);              // Enable driver
-    driver->rms_current(1000);    // Set current to 1A
-    driver->microsteps(16);       // Set microsteps to 16
-    driver->en_pwm_mode(true);    // Enable stealthChop
+    driver->toff(5);                       // Enable driver
+    driver->rms_current(DEFAULT_CURRENT);  // Set current to 1A
+    driver->microsteps(16);                // Set microsteps to 16
+
+    // Configure spreadCycle
+    driver->en_pwm_mode(false);   // Disable stealthChop
     driver->pwm_autoscale(true);  // Enable automatic current scaling
 
-    // Motion profile settings
-    driver->VSTART(0);     // Start velocity
-    driver->A1(1000);      // First acceleration
-    driver->V1(100000);    // First velocity
-    driver->AMAX(2000);    // Maximum acceleration
-    driver->VMAX(200000);  // Maximum velocity
-    driver->DMAX(2000);    // Maximum deceleration
-    driver->D1(1000);      // First deceleration
-    driver->VSTOP(10);     // Stop velocity
-    driver->TZEROWAIT(0);  // Zero crossing wait time
-
     // StallGuard configuration
-    driver->TCOOLTHRS(0xFFFFF);  // 20bit max
-    driver->SGTHRS(100);         // Stall threshold
+    driver->TCOOLTHRS(0xFFFFF);   // 20bit max
+    setSGTHRS(driverIndex, 100);  // Stall threshold
+
+    // Enable the driver
+    enableDriver(driverIndex, true);
+
+    // Print configuration
+    Serial.printf("Driver %d configured:\n", driverIndex);
+    Serial.printf("  Current: %d mA\n", DEFAULT_CURRENT);
+    Serial.printf("  Microsteps: 16\n");
+    Serial.printf("  Mode: STEP/DIR with spreadCycle\n");
+
+    // Read and print important registers
+    uint32_t drv_status = driver->DRV_STATUS();
+    uint32_t gconf      = driver->read(0x00);
+    Serial.printf("  DRV_STATUS: 0x%08X\n", drv_status);
+    Serial.printf("  GCONF: 0x%08X\n", gconf);
 }
 
 void TMC5160Manager::setDirection(uint8_t driverIndex, bool direction)
@@ -133,41 +149,10 @@ void TMC5160Manager::setMicrosteps(uint8_t driverIndex, uint16_t microsteps)
     drivers[driverIndex]->microsteps(microsteps);
 }
 
-void TMC5160Manager::setMaxSpeed(uint8_t driverIndex, uint32_t speed)
-{
-    if (driverIndex >= NUM_DRIVERS || !drivers[driverIndex])
-        return;
-    drivers[driverIndex]->VMAX(speed);
-}
-
-void TMC5160Manager::setAcceleration(uint8_t driverIndex, uint32_t acceleration)
-{
-    if (driverIndex >= NUM_DRIVERS || !drivers[driverIndex])
-        return;
-    drivers[driverIndex]->AMAX(acceleration);
-}
-
-void TMC5160Manager::moveToPosition(uint8_t driverIndex, int32_t position)
-{
-    if (driverIndex >= NUM_DRIVERS || !drivers[driverIndex])
-        return;
-    drivers[driverIndex]->XTARGET(position);
-    currentPositions[driverIndex] = position;
-}
-
-void TMC5160Manager::moveRelative(uint8_t driverIndex, int32_t distance)
-{
-    if (driverIndex >= NUM_DRIVERS || !drivers[driverIndex])
-        return;
-    int32_t newPosition = currentPositions[driverIndex] + distance;
-    moveToPosition(driverIndex, newPosition);
-}
-
 void TMC5160Manager::stopMotor(uint8_t driverIndex)
 {
     if (driverIndex >= NUM_DRIVERS || !drivers[driverIndex])
         return;
-    drivers[driverIndex]->XTARGET(drivers[driverIndex]->XACTUAL());
 }
 
 void TMC5160Manager::emergencyStop()
@@ -182,23 +167,16 @@ void TMC5160Manager::emergencyStop()
     }
 }
 
-bool TMC5160Manager::isMoving(uint8_t driverIndex)
+void TMC5160Manager::setSGTHRS(uint8_t driverIndex, uint32_t threshold)
 {
     if (driverIndex >= NUM_DRIVERS || !drivers[driverIndex])
-        return false;
-    return (drivers[driverIndex]->VACTUAL() != 0);
+        return;
+    drivers[driverIndex]->write(0x40, threshold);  // Direct register access
 }
 
-int32_t TMC5160Manager::getCurrentPosition(uint8_t driverIndex)
+uint32_t TMC5160Manager::getSG_RESULT(uint8_t driverIndex)
 {
     if (driverIndex >= NUM_DRIVERS || !drivers[driverIndex])
         return 0;
-    return drivers[driverIndex]->XACTUAL();
-}
-
-uint32_t TMC5160Manager::getCurrentSpeed(uint8_t driverIndex)
-{
-    if (driverIndex >= NUM_DRIVERS || !drivers[driverIndex])
-        return 0;
-    return drivers[driverIndex]->VACTUAL();
+    return drivers[driverIndex]->sg_result();  // TMC5160 uses lowercase method names
 }
