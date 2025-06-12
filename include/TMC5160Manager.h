@@ -50,7 +50,6 @@ public:
     void emergencyStop();
 
 private:
-    static constexpr uint8_t  NUM_DRIVERS     = 4;
     static constexpr uint32_t SPI_CLOCK       = 1000000;  // 1MHz SPI clock
     static constexpr float    R_SENSE         = 0.11f;    // Sense resistor value in ohms (updated value)
     static constexpr uint16_t DEFAULT_CURRENT = 1000;     // Default current in mA
